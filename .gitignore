@@ -1,0 +1,5 @@
+src/__pycache__
+src/omega_word2vec_test.h5
+src/similarity_word2vec_test.h5
+TransE/
+
