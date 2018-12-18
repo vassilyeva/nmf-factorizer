@@ -18,9 +18,18 @@ choices = memmap, tables, sparse (for sparse csr matrix)
 method = 'tables'   
 use_memmap = True
 use_tables = False
-
-# TODO: set up device for pytorch
+without_pytorch = True
  
+def delete_rows_csr(mat, indices):
+    """
+    Remove the rows denoted by ``indices`` form the CSR sparse matrix ``mat``.
+    """
+    if not isinstance(mat, sparse.csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
+    indices = list(indices)
+    mask = np.ones(mat.shape[0], dtype=bool)
+    mask[indices] = False
+    return mat[mask]
 
 def dropcols_fancy(M, idx_to_drop):
     idx_to_drop = np.unique(idx_to_drop)
@@ -45,7 +54,8 @@ def compute_tfidf_matrix(params):
 
 	words = vectorizer.get_feature_names()
 
-	return V, sentences, words
+
+	return V.transpose().tocsr(), sentences, words
 	
 
 
@@ -72,23 +82,29 @@ def compute_entity_matrix(params):
 	entity_embeddings = np.array(entity_embeddings)
 	size = len(entity_embeddings)
 
+	nzeros = 0 # rm
 	if not params.use_pytorch_entities:
 		S = cosine_similarity(entity_embeddings)
 		S[S <= params.similarity_threshold] = 0
+		nzeros += (S == 0).sum() # rm
 		S_sparse = sparse.lil_matrix(S)
 	else: 
 		embeddings = torch.tensor(entity_embeddings).to(params.device)
 		embeddings_norm = embeddings / embeddings.norm(dim = 1)[:, None]
 		S_sparse = sparse.lil_matrix((size, size))
-		for i in range(0, size, 1000):
+		for i in range(0, size, params.incr):
 			print('On row ', i)
-			end = min(i+1000, size)
+			end = min(i+params.incr, size)
 			S_part = torch.mm(embeddings_norm, embeddings_norm[i:end].transpose(0,1))
+			S_part[S_part <= params.similarity_threshold] = 0
+			nzeros += (S_part == 0).sum()  # rm
 			# TODO; QUESTION: should I sparsify this as well by checking against threshold??
 			try:
 				S_sparse[:, i:end] = S_part.data.numpy()
 			except: 
 				S_sparse[:, i:end] = S_part.cpu().data.numpy()
+
+		print('N zeros in entity to entity - ', nzeros)
 		''' without for loop 
 		S = torch.mm(embeddings_norm, embeddings_norm.transpose(0, 1))
 
@@ -108,15 +124,27 @@ def construct_Sw(params, entity_embeddings):
 	embeddings = torch.tensor(entity_embeddings).to(params.device)
 	embeddings_norm = embeddings / embeddings.norm(dim = 1)[:, None]
 
-	for i in range(0, embeddings.shape[0], 1000):
+	nzeros = 0
+
+	if without_pytorch:
+		for i in range(0, embeddings.shape[0], params.incr):
+			print('On row ', i)
+			end = min(i+params.incr, embeddings.shape[0])
+			S_part = cosine_similarity(embeddings, embeddings[i:end])
+			S[:, i:end] = S_part
+
+	for i in range(0, embeddings.shape[0], params.incr):
 		print('On row ', i)
-		end = min(i+1000, embeddings.shape[0])
+		end = min(i+params.incr, embeddings.shape[0])
 		S_part = torch.mm(embeddings_norm, embeddings_norm[i:end].transpose(0,1))
 		S_part[S_part <= params.similarity_threshold] = 0   # sparsify
+		nzeros += (S_part == 0).sum().data 
 		try:
 			S[:, i:end] = S_part.data.numpy()
 		except: 
 			S[:, i:end] = S_part.cpu().data.numpy()
+	print('Sw matrix number zeros - {}; proportion - {}'.format(nzeros, nzeros/embedding_len**2))
+	S.flush()
 	h5file.close()
 
 def construct_Omega(params, size):
@@ -126,11 +154,14 @@ def construct_Omega(params, size):
 	Omega = h5omega.create_carray(h5omega.root, 'omega', tb.Float32Atom(), shape = (size, size))
 
 	h5sim = tb.open_file(params.h5filename, 'r')   # Sw matrix
+	nzeros = 0
 
 	for i in range(size):
 		L = np.zeros(size)
 		L[i] = h5sim.root.similarity[i].sum()
 		Omega[i] = L - h5sim.root.similarity[i]
+		nzeros += (Omega[i] == 0).sum()
+	print('Omega matrix number zeros - {}; proportion = {}'.format(nzeros, nzeros/size**2))
 	h5omega.close()
 	h5sim.close()
 
@@ -140,6 +171,8 @@ def construct_Omega(params, size):
 
 
 def compute_cosine_similarity_words(params, tfidf_matrix, documents, words):
+	pytorch = 'with pytorch' if without_pytorch == False else 'without pytorch'
+	print("Computing "+pytorch + ' using '+method + 'increment - ', params.incr)
 	model = Word2Vec([[word for word in sentence.split()] for sentence in documents], size = 100, min_count = 0)
 
 	embedding_len = len(list(model.wv.vocab.values()))
@@ -151,7 +184,8 @@ def compute_cosine_similarity_words(params, tfidf_matrix, documents, words):
 	words = [w for w in words if w not in missing_words]   # remove missing words from list of words
 	print('Total number words: ', len(words))
 
-	tfidf_matrix = dropcols_fancy(tfidf_matrix, to_drop)
+	#tfidf_matrix = dropcols_fancy(tfidf_matrix, to_drop)
+	tfidf_matrix = delete_rows_csr(tfidf_matrix, to_drop)
 	print('Removed empty rows from TFIDF matrix')
 
 	# compute similarity matrix

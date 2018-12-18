@@ -11,7 +11,6 @@ import os
 
 
 def parse_args():
-
 	parser = argparse.ArgumentParser(description = "NMF Factorization parameters")
 	parser.add_argument('--similarity', default = 'cos', choices = ['wn-path', 'wn-wup', 'cos'], help = 'type of similarity between words - either Wordnet based or cosine')
 	parser.add_argument('--data_text')     # default is freebase
@@ -19,6 +18,7 @@ def parse_args():
 	parser.add_argument('--transe_method', default = 'bern', choices = ['bern', 'unif'])
 	parser.add_argument('--device', default = 'default', choices = ['default', 'gpu', 'cpu'])
 	parser.add_argument('--use_idf', default = True, type = bool)
+	parser.add_argument('--incr', default = 1000, type = int)
 
 	# TEST ARGUMENTS
 	parser.add_argument('--dataset', default = 'freebase', choices = ['freebase', 'test'])
@@ -68,6 +68,7 @@ def set_params(params, args):
 		params.device = torch.device('cuda:0')
 	else:
 		params.device = torch.device('cpu')
+	params.incr = args.incr
 
 
 
