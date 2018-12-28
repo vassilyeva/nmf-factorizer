@@ -20,6 +20,10 @@ def parse_args():
 	parser.add_argument('--use_idf', default = True, type = bool)
 	parser.add_argument('--incr', default = 1000, type = int)
 
+	# NN parameters
+	parser.add_argument('--lambda', default = 10, type = float)
+	parser.add_argument('--nepochs', default = 1000, type = int)
+
 	# TEST ARGUMENTS
 	parser.add_argument('--dataset', default = 'freebase', choices = ['freebase', 'test'])
 
@@ -42,7 +46,8 @@ def set_params(params, args):
 	if args.dataset == 'test':
 		params.dataset_text 	= '../datasets/Test/entityWords.txt'
 		params.dataset_vocab 		= '../datasets/Test/word2id.txt'
-		params.dataset_transe = '../datasets/Test/entity2vec.' + args.transe_method		
+		params.dataset_transe = '../datasets/Test/entity2vec.' + args.transe_method	
+		params.test = True	
 	elif args.dataset == 'freebase':
 		params.dataset_text 		= '../datasets/Freebase15k/entityWords.txt'
 		params.dataset_entities 	= '../datasets/Freebase15k/train.txt'
@@ -64,8 +69,10 @@ def set_params(params, args):
 
 	if  args.device == 'default':
 		params.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+		params.torch_type = torch.FloatTensor
 	elif args.device == 'gpu':
 		params.device = torch.device('cuda:0')
+		params.torch_type = torch.cuda.FloatTensor
 	else:
 		params.device = torch.device('cpu')
 	params.incr = args.incr

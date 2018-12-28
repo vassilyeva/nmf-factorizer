@@ -15,7 +15,7 @@ class Settings:
 		# Word similarity matrix
 		self.use_idf        = True
 		self.similarity     = 'cos'
-		self.similarity_threshold = 0.3
+		self.similarity_threshold = 0.8
 
 		self.similarity_matrix_filename = path.join(mkdtemp(), 'similarity_matrix.dat')
 
@@ -33,3 +33,9 @@ class Settings:
 
 		# TEMPORARY SETTINGS:
 		self.use_pytorch_entities = True
+		self.test = False
+
+
+		# NMF learning parameters
+		self.lr = .0001
+		self.n_epochs = 1000
