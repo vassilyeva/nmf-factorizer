@@ -3,6 +3,8 @@ from nltk.corpus import wordnet as wn
 
 from tempfile import mkdtemp
 import os.path as path
+import torch.cuda as tc
+
  
 
 class Settings:
@@ -39,3 +41,4 @@ class Settings:
 		# NMF learning parameters
 		self.lr = .0001
 		self.n_epochs = 1000
+		self.type = tc.FloatTensor # if torch.cuda.is_available else torch.FloatTensor

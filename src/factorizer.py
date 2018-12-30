@@ -9,6 +9,14 @@ import torch
 import subprocess
 import os
 
+import os.path
+import dataprocessing as dp
+
+import numpy as np
+from scipy import sparse
+
+
+
 
 def parse_args():
 	parser = argparse.ArgumentParser(description = "NMF Factorization parameters")
@@ -19,6 +27,7 @@ def parse_args():
 	parser.add_argument('--device', default = 'default', choices = ['default', 'gpu', 'cpu'])
 	parser.add_argument('--use_idf', default = True, type = bool)
 	parser.add_argument('--incr', default = 1000, type = int)
+	parser.add_argument('--sim_matrix', default = 'compute', choices = ['compute', 'fromfile'])
 
 	# NN parameters
 	parser.add_argument('--lambda', default = 10, type = float)
@@ -85,14 +94,25 @@ if __name__ == "__main__":
 	args = parse_args()
 	set_params(params, args)
 
-	'''
-	params.transe_method = args.transe_method
-	params.transe_dataset = '../datasets/entity2vec.' + args.transe_method
-	if not os.path.isfile(params.transe_dataset):     # vector embeddings for entities does not exist
-		# TODO: RUN THE C++ EXECUTABLE   ???
-	'''
+	
+	V, sentences, words = dp.compute_tfidf_matrix(params)
+	print('TFIDF Shape - ', V.shape)
 
+	if args.sim_matrix == 'fromfile':
+		Sw = sparse.load_npz('Sw.npz')
+		Se = sparse.load_npz('Se.npz')
+	else:
+		if params.similarity == 'cos':
+			V, Sw = dp.compute_Sw_cosine(params, V, sentences, words)
+		else: 
+			Sw = dp.compute_wordnet_similarity_words(params, words)
+		print('Constructed Sw matrix, shape - {}'.format(Sw.shape))
 
-	W, H = custom_nmf(params)   # computes the custom nmf params
+		#S_matrix = np.memmap(params.similarity_matrix_filename, dtype = 'float32', mode = 'r')
+		Se = dp.compute_Se_cosine(params)
+
+	print('Constructed Se matrix, shape - {}'.format(Se.shape))
+
+	W, H = custom_nmf(V, Sw, Se,  params)   # computes the custom nmf params
 
 

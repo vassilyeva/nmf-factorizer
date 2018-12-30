@@ -79,7 +79,7 @@ def cosine_similarity_matrix(params, embeddings, matrix_type):
 		print('On columns {} -- {}'.format(i, end))
 
 		S_part = torch.mm(embeddings_norm, embeddings_norm[i:end].transpose(0,1))
-		'''
+		
 		topk, indices = torch.topk(S_part, k, dim = 0)
 		S_part_sparse = torch.zeros(S_part.shape).to(params.device)
 		S_part_sparse = S_part_sparse.scatter(0, indices, topk)
@@ -87,30 +87,13 @@ def cosine_similarity_matrix(params, embeddings, matrix_type):
 			simlarity_matrix[:, i:end] = S_part_sparse.data.numpy()
 		except: 
 			similarity_matrix[:, i:end] = S_part_sparse.cpu().data.numpy()
-		'''
-		for j in range(S_part.shape[1]):
-			sparse_col = torch.zeros(S_part.shape[0], 1).to(params.device)
-	
-			topk, indices = torch.topk(S_part[:, j], k, dim = 0)
-			sparse_col = sparse_col.scatter(0, indices.view(-1, 1), topk.view(-1, 1))
-			try:
-				simlarity_matrix[:, i:end] = sparse_col.data.numpy()
-			except: 
-				similarity_matrix[:, i:end] = sparse_col.cpu().data.numpy()
 
+	similarity_matrix = similarity_matrix.transpose()
 	similarity_matrix = similarity_matrix.tocsr()
 	similarity_matrix.eliminate_zeros()
-	dense = similarity_matrix.todense()
-	for col in range(dense.shape[1]):
-		c= dense[:, col]
-		nnz = (c != 0).sum()
-		if nnz != k: print('on col {}, number nonzeros is {}'.format(col, nnz))
-	
-	for r in range(dense.shape[0]):
-		row = dense[r, :]
-		nnz = (row != 0).sum()
-		if nnz != k: print('on row {}; n nonzeros is {}'.format(r, nnz))
-	print()
+
+	# save sparse matrix
+	sparse.save_npz(matrix_type + '.npz', similarity_matrix)
 	return similarity_matrix
 
 def compute_Se_cosine(params):
