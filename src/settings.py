@@ -39,6 +39,15 @@ class Settings:
 
 
 		# NMF learning parameters
-		self.lr = .0001
-		self.n_epochs = 1000
-		self.type = tc.FloatTensor # if torch.cuda.is_available else torch.FloatTensor
+		self.lr = .01
+		self.n_epochs = 500
+		self.floatType = tc.FloatTensor # if torch.cuda.is_available else torch.FloatTensor
+		self.longType = tc.LongTensor
+
+		self.n_batches = 100
+		self.n_negative = 3			# number of negative samples for each positive datasample
+
+		self.opt = 'sgd'
+
+		# MODEL settings
+		self.n_features = 50

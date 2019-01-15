@@ -52,8 +52,8 @@ def compute_tfidf_matrix(params):
 
 	words = vectorizer.get_feature_names()
 
-
-	return V.tocsr(), sentences, words
+	V = V.tocsr()
+	return V, sentences, words
 	
 
 # compute cosine similarity between vectors using wordnet functions
@@ -70,6 +70,7 @@ def compute_similarity(params, synset_pair):
 def cosine_similarity_matrix(params, embeddings, matrix_type):
 	k = 5		# top k similarity values to keep - change this!
 	size = len(embeddings)
+	print('computed embedding shape is ', embeddings.shape)
 
 	embeddings = torch.Tensor(embeddings).to(params.device)
 	embeddings_norm = embeddings / embeddings.norm(dim = 1)[:, None]
@@ -96,21 +97,21 @@ def cosine_similarity_matrix(params, embeddings, matrix_type):
 	sparse.save_npz(matrix_type + '.npz', similarity_matrix)
 	return similarity_matrix
 
-def compute_Se_cosine(params):
-	if params.test: print('params.test is true')
+def compute_Se_cosine(params, dataset):
 	# load embedding vectors
+	print('in compute SE cosine')
 	line_count = 0
 	entity_embeddings = []
 	with open(params.dataset_transe, 'r') as fin:
 		for line in fin:
-			if params.test and line_count == 10: 
-				break
 			embedding = line.split('\t')
 			assert embedding[-1] == '\n', 'ONE LINE DOES NOT HAVE ENDOFLINE'
 			entity_embeddings.append([float(elem) for elem in embedding[:-1]])
 			line_count += 1
+	fin.close()
 	entity_embeddings = np.array(entity_embeddings)
-	return cosine_similarity_matrix(params, entity_embeddings, 'Se')
+	print('shape of embeddings - ', entity_embeddings.shape)
+	return cosine_similarity_matrix(params, entity_embeddings, 'Se_'+dataset)
 
 '''
 def construct_Sw_cosine(params, word_embeddings, words):
@@ -137,7 +138,7 @@ def construct_Sw_cosine(params, word_embeddings, words):
 	return Sw.tocsr()
 '''
 
-def compute_Sw_cosine(params, tfidf_matrix, documents, words):
+def compute_Sw_cosine(params, tfidf_matrix, documents, words, dataset):
 
 	model = Word2Vec([[word for word in sentence.split()] for sentence in documents], size = 100, min_count = 0)
 	embedding_len = len(list(model.wv.vocab.values()))
@@ -156,8 +157,9 @@ def compute_Sw_cosine(params, tfidf_matrix, documents, words):
 
 	n_rows = len(embeddings)
 	
-	Sw = cosine_similarity_matrix(params, embeddings, 'Sw')
+	Sw = cosine_similarity_matrix(params, embeddings, 'Sw_'+dataset)
 	
+	sparse.save_npz('V_'+dataset+'.npz', tfidf_matrix)
 	return tfidf_matrix, Sw
 
 
