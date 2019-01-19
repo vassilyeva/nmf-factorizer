@@ -68,7 +68,7 @@ def compute_similarity(params, synset_pair):
 
 	
 def cosine_similarity_matrix(params, embeddings, matrix_type):
-	k = 5		# top k similarity values to keep - change this!
+	k = params.n_similar		# top k similarity values to keep - change this!
 	size = len(embeddings)
 	print('computed embedding shape is ', embeddings.shape)
 
@@ -110,7 +110,6 @@ def compute_Se_cosine(params, dataset):
 			line_count += 1
 	fin.close()
 	entity_embeddings = np.array(entity_embeddings)
-	print('shape of embeddings - ', entity_embeddings.shape)
 	return cosine_similarity_matrix(params, entity_embeddings, 'Se_'+dataset)
 
 '''
@@ -140,7 +139,7 @@ def construct_Sw_cosine(params, word_embeddings, words):
 
 def compute_Sw_cosine(params, tfidf_matrix, documents, words, dataset):
 
-	model = Word2Vec([[word for word in sentence.split()] for sentence in documents], size = 100, min_count = 0)
+	model = params.emb_model([[word for word in sentence.split()] for sentence in documents], size = 100, min_count = 0)
 	embedding_len = len(list(model.wv.vocab.values()))
 	vocab = list(model.wv.vocab.keys())
 
@@ -168,3 +167,5 @@ def compute_wordnet_similarity_words(params, words):
 	synset_combinations = itertools.combinations(all_synsets, 2)
 	similarities_vector = [compute_similarity(params, word_pair) for word_pair in synset_combinations]
 	return sparse.csr_matrix(similarities_vector)
+
+

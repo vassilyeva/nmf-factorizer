@@ -1,4 +1,4 @@
-import os.path
+from collections import Counter
 import dataprocessing as dp
 
 import numpy as np
@@ -168,7 +168,7 @@ class CustomLoss(torch.nn.Module):
 
 		
 		#i_indices = torch.LongTensor(i_indices_list).to(device)
-		i_indices = torch.from_numpy(i_indices_numpy).to(device)
+		i_indices = torch.LongTensor(i_indices_numpy).to(device)
 		n_repeat = len(S_sample_indices) // len(batch)
 		
 		if print_time_similarity: 
@@ -211,30 +211,9 @@ class CustomLoss(torch.nn.Module):
 			print("time to gather S_sample - ", t_diff)
 		penalty = (norms * S_sample).sum()
 		return penalty
-		'''
-		n_repeat = S_sample_indices.shape[1]
-		columns = S_sample_indices.data.cpu().numpy().flatten()
-		rows = np.array(i_indices_list).repeat(n_repeat)
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to collect indices for the S matrices - ", t_diff)
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
-		S_sample = torch.FloatTensor(S[rows, columns]).flatten().to(device)
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to gather S_sample - ", t_diff)
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
-		penalty = (norms * S_sample).sum()
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to compute penalty - ", t_diff)
+		
 
-		return penalty
-		'''
-
-	def forward(self, target, prediction, lamb, batch, model, Sw, Se):
+	def forward(self, target, prediction, reg, batch, model, Sw, Se):
 		tensor_type = model.type
 		tensor_type = tc.FloatTensor
 		penalty = tensor_type([0])
@@ -255,7 +234,12 @@ class CustomLoss(torch.nn.Module):
 			print('time to compute similarity matrices penalty - ', t_diff)
 		word_penalty = self.similarity_matrix_penalty(model.W, Sw, batch, model.device, False)
 
-		similarity_penalty = word_penalty + entity_penalty
+		#similarity_penalty = regword_penalty + entity_penalty
+		assert entity_penalty.item() >= 0, "Entity penalty is negative"
+		assert word_penalty.item() >= 0, 'Word penalty is negative'
+		loss = (target.to(model.device) - prediction.to(model.device)).norm(2) + \
+			    reg[0]*entity_penalty + reg[1]*word_penalty + reg[2]*penalty.to(model.device)
+		return loss
 		
 			
 
@@ -281,23 +265,50 @@ class CustomLoss(torch.nn.Module):
 
 		return (actual.to(model.device) - prediction).norm(2) + lamb*penalty + similarity_penalty.type(tensor_type)
 	'''
-def rejection_sample(item, nonzeros, total):
-	negative_sample = []
-	while len(negative_sample) < 5:
-		randoms = np.random.randint(low = 0, high = total, size = 5 - len(negative_sample))
-		negative_sample.extend([(item[0], j) for j in randoms if (item[0], j) not in nonzeros])
-	return negative_sample
 
-def rejection_sampling(n, nonzeros, already_sampled, n_rows, n_cols):
+def rejection_sampling(batch_counter, n_negatives, high, nonzeros, already_sampled, from_entities):
+	total_negative_sample = set()		# negative sample for the whole batch
+	for entity, n_occurences in batch_counter.items():
+		size = n_occurences * n_negatives    # size of negative sample
+		# do the actual sampling
+		negative_sample_for_element = set()     # keeps track of negative sample for this element in batch
+		while len(negative_sample_for_element) < size:
+			n_items = size - len(negative_sample_for_element)	# number of negative samples we should try getting
+			random_sample = set(np.random.randint(low = 0, high = high, size = n_items))	# sample words (columns)
+			if from_entities:
+				random_sample = set([(entity, rs) for rs in random_sample]) - nonzeros - already_sampled   # create tuples, remove all nonzero elements
+			else: 
+				random_sample = set([(rs, entity) for rs in random_sample]) - nonzeros - already_sampled   # same, but for words
+			negative_sample_for_element |= random_sample
+		total_negative_sample |= negative_sample_for_element    # add constructed negative sample to the set of negative samples for this batch
+	return total_negative_sample
+
+
+		
+'''
+def rejection_sampling(n, nonzeros, already_sampled, n_rows, n_cols, from_entities):
 	negative_sample = []
 	while len(negative_sample) < n:
 		diff = n - len(negative_sample)
 		random_sample = [(np.random.randint(low = 0, high = n_rows), np.random.randint(low = 0, high = n_cols)) for _ in range(diff)]
 		negative_sample.extend([item for item in random_sample if (item not in nonzeros and item not in already_sampled)])
 	return negative_sample
+'''
+
+def plot_results(losses, differences, n_epochs, model, title):
+	# plot loss and difference
+	plt.plot(range(0, n_epochs, 50), differences, label = '|V - EW|')
+	plt.xlabel("Epoch"); plt.ylabel("Error")
+	plt.title(title[:-4])
+
+	plt.plot(losses, label = 'Loss')
+	plt.xlabel("Epoch")
+	plt.legend()
+	#plt.show()
+	plt.savefig(title)
 
 
-def construct_batches(n_batches, n_negative, n_words, V):
+def construct_batches(n_batches, n_negatives, V, from_entities):
 	row_inds, col_inds = V.nonzero()
 
 	batchsize = np.int_(np.ceil(len(row_inds) / n_batches))
@@ -310,17 +321,36 @@ def construct_batches(n_batches, n_negative, n_words, V):
 	batches = [nonzeros[i : i+batchsize] for i in range(0, len(row_inds), batchsize)]
 	assert len(batches) == n_batches, "Wrong number of batches computed!"
 
-	print('Constructed positive samples')
+	#print('Constructed positive samples')
 
 	# add negative samples
 	already_sampled = set()
-
 	nonzeros = set(nonzeros)
+	bcount = 0
+
+	if from_entities: # for every (i,j) find (i,*) not in nonzeros
+		for batch in batches:
+			batch_counter = Counter([b[0] for b in batch])
+			negative_samples = rejection_sampling(batch_counter, n_negatives, V.shape[1], nonzeros, already_sampled, from_entities)
+			already_sampled |= negative_samples
+			batch.extend(list(negative_samples))
+
+	else:   # sample from entites, i.e., keep column value same, change rows
+		for batch in batches:
+			batch_counter = Counter([b[1] for b in batch])
+			negative_samples = rejection_sampling(batch_counter, n_negatives, V.shape[0], nonzeros, already_sampled, from_entities)
+			already_sampled |= negative_samples
+			batch.extend(list(negative_samples))
+
+	#print('Constructed negative samples')
+	'''
+
 	for batch in batches:
-		negative_samples = rejection_sampling(len(batch) * n_negative, nonzeros, already_sampled, V.shape[0], n_words)
+		negative_samples = rejection_sampling(len(batch), n_negative, nonzeros, already_sampled, V.shape[0], n_words, from_entities)
 		batch.extend(negative_samples)
 		already_sampled.update(negative_samples)
 	print('Constructed negative samples')
+	'''
 	return batches
 
 
@@ -352,9 +382,24 @@ def get_target_values(batch, V):
 	return torch.FloatTensor(V[row_indices, col_indices])
 	#return torch.cat([V[i].unsqueeze(0) for i in batch])
 
+def check_densities(V):
+	rows, cols = V.nonzero()
+	row_counter, col_counter = Counter(rows), Counter(cols)
+	row_max = max(list(row_counter.values()))
+	col_max = max(list(col_counter.values()))
+
+	return True if row_max/V.shape[1] <= col_max/V.shape[0] else False 
 
 
-def custom_nmf(V, Sw, Se, params):
+def custom_nmf(V, Sw, Se, params, hyperparams, title):
+
+	# decide where to draw negative samples from - entities (= for every (i,j) positive, find (i, *) neg) or words
+	'''density_column = np.max(V.sum(0).A1)/V.shape[0]
+	density_row = np.max(V.sum(1).A1)/V.shape[1]
+	from_entities = True if density_row <= density_column else False
+	'''
+
+	from_entities = check_densities(V)
 
 	n_words = Sw.shape[0]
 	n_entities = Se.shape[0]
@@ -368,12 +413,10 @@ def custom_nmf(V, Sw, Se, params):
 	# define model
 
 
-	model = NMF(n_entities, n_words, params.n_features, params)
+	model = NMF(n_entities, n_words, hyperparams.n_features, params)
 
 	loss = CustomLoss(params.device)
-	optimizer = torch.optim.SGD(model.parameters(), lr = params.lr) 
-	n_epochs = params.n_epochs
-	lam = 10 # TODO: clean this up
+	optimizer = hyperparams.optim(model.parameters(), **hyperparams.optim_settings)
 	
 
 	# construct tensors
@@ -382,15 +425,14 @@ def custom_nmf(V, Sw, Se, params):
 
 	losses = []
 	differences = []
-	for epoch in range(n_epochs):
+	for epoch in range(hyperparams.n_epochs):
 		# construct batch = one row, n positive samples, 3n negative samples
-		row_permutation = np.random.permutation(n_entities)
 		total_loss = 0 
-		batches = construct_batches(params.n_batches, params.n_negative, n_words, V)
+		batches = construct_batches(hyperparams.n_batches, hyperparams.n_negatives, V, from_entities)
 		bcount = -1
 		for batch in batches:
 			bcount += 1
-			model.zero_grad()
+			optimizer.zero_grad()
 
 			#print('On batch ', bcount)
 			if print_time:
@@ -411,27 +453,13 @@ def custom_nmf(V, Sw, Se, params):
 				print('Time to compute prediction - ', t_diff)
 
 			if print_time: t_start = timeit.default_timer()
-			l = loss(target, prediction, lam, batch, model, Sw, Se)
+			l = loss(target, prediction, hyperparams.lambdas, batch, model, Sw, Se)
 			
 			if print_time: 
 				t_diff = (timeit.default_timer() - t_start)*100
 				print('Time to compute loss - ', t_diff)
 
 
-
-			'''
-			sample_indices, word_i_indices, entity_j_indices = get_batch_indices(V, Sw, Se, row_ind, params.device, n_entities)
-			#sample_values, sample_columns, word_i_indices, entity_j_indices = generate_batch(V, Sw, Se, row, n_entities)
-
-			target = torch.gather(V_var[row_ind], 0, sample_indices)
-
-			optimizer.zero_grad()
-			prediction = model(row_ind, sample_indices)
-	
-
-			l = loss(target, prediction, row_ind, word_i_indices, entity_j_indices, sample_indices, lam, model, Sw, Se)
-			'''
-			losses.append(l.item())
 			l.backward(retain_graph = True)
 
 			optimizer.step()
@@ -440,32 +468,22 @@ def custom_nmf(V, Sw, Se, params):
 			torch.cuda.empty_cache()
 
 		# test the model after each epoch
+		#total_loss /= hyperparams.n_batches   
+		losses.append(total_loss)
+		print('Epoch - {}: loss - {}'.format(epoch, total_loss))
 		if epoch % 50 == 0:
 			t_start = timeit.default_timer()
 			V_prediction = torch.mm(model.E, model.W)   
 			t_diff = timeit.default_timer() - t_start
-			print('time to compute difference - ', t_diff * 100)
-			difference = (V_tensor - V_prediction).norm(2).item()
-			differences.append(difference)
-			print('Epoch - {}, error - {}'.format(epoch, difference))
-
-		total_loss /= params.n_batches   
-		losses.append(total_loss)
-		print('Epoch {}: current loss - {}'.format(epoch, total_loss))
-		print()
-
-	# plot loss and difference
-	plt.plot(differences)
-	plt.xlabel("Epoch"); plt.ylabel("Error")
-	plt.title("Difference between actual matrix and computed matrix")
-	plt.show()
-
-	plt.plot(losses)
-	plt.xlabel("Epoch"); plt.ylabel("Loss")
-	plt.title("Loss function")
-	plt.show()
+			#print('time to compute difference - ', t_diff * 100)
+			diff = (V_tensor - V_prediction).norm(2).item()
+			differences.append(diff)
+			print('\t\t \t \t difference - {}'.format(diff))
 
 
+	plot_results(losses, differences, hyperparams.n_epochs, model, title)
+
+	return 0, 0
 
 			
 

@@ -1,6 +1,7 @@
 
 import argparse
 from settings import Settings
+from hyperparams import Hyperparameters
 from nmf import custom_nmf
 from nltk.corpus import wordnet as wn
 
@@ -20,20 +21,23 @@ from scipy import sparse
 
 def parse_args():
 	parser = argparse.ArgumentParser(description = "NMF Factorization parameters")
+
 	parser.add_argument('--similarity', default = 'cos', choices = ['wn-path', 'wn-wup', 'cos'], help = 'type of similarity between words - either Wordnet based or cosine')
 	parser.add_argument('--transe_method', default = 'bern', choices = ['bern', 'unif'])
 	parser.add_argument('--device', default = 'default', choices = ['default', 'gpu', 'cpu'])
 	parser.add_argument('--use_idf', default = True, type = bool)
 	parser.add_argument('--incr', default = 1000, type = int)
 	parser.add_argument('--sim-matrix', default = 'compute', choices = ['compute', 'fromfile'], help = 'compute similarity matrices or load them from file')
+	parser.add_argument('--n-similar', type = int, default = 20, help = 'Number of top similar words/entities to consider for Sw/Se matrices')
+	parser.add_argument('--word-model', default = 'word2vec', choices = ['word2vec', 'fasttext'])
 
-	# NN parameters
-	parser.add_argument('--lambda', default = 10, type = float)
-	parser.add_argument('--nepochs', default = 1000, type = int)
+	# NMF parameters
 	parser.add_argument('--lr', default = .001, type = float, help = 'learning rate')
-	parser.add_argument('--optimizer', default = 'sgd', choices = ['sgd', 'adam'])
-	parser.add_argument('--n-epochs', type = int, help = 'Number of epochs for optimizer')
-	parser.add_argument('--n-batches', type = int, help = 'Number of batches')
+	parser.add_argument('--optim', default = 'sgd', choices = ['sgd', 'adam', 'adagrad'])
+	parser.add_argument('--n-epochs', type = int, default = 250, help = 'Number of epochs for optimizer')
+	parser.add_argument('--n-batches', type = int, default = 100, help = 'Number of batches')
+	parser.add_argument('--n-features', type = int, default = 100, help = 'Number of features in embedding')
+	parser.add_argument('--n-negatives', type = int, default = 5, help = 'Number negative samples for each positive one')
 
 
 	# TEST ARGUMENTS
@@ -98,20 +102,30 @@ def set_params(params, args):
 		params.device = torch.device('cpu')
 		params.floatType = torch.FloatTensor
 		params.longType = torch.LongTensor
+
+
 	if args.n_epochs:
 		params.n_epochs = args.n_epochs
 	if args.n_batches:
 		params.n_batches = args.n_batches
 	params.incr = args.incr
 	params.opt = args.optimizer
+	params.lr = args.lr
 
 
 
 
 if __name__ == "__main__":
+	print('Now without dividing total loss by n_batches')
 	params = Settings()   # get model parameters
 	args = parse_args()
-	set_params(params, args)
+	params.set(args)
+	print('Embedding model - ' + args.word_model)
+
+
+	hp = Hyperparameters()
+	hp.set(args)
+	#set_params(params, args)
 
 	
 
@@ -135,8 +149,72 @@ if __name__ == "__main__":
 		#S_matrix = np.memmap(params.similarity_matrix_filename, dtype = 'float32', mode = 'r')
 		Se = dp.compute_Se_cosine(params, args.dataset)
 		print('Constructed Se matrix')
+	'''
+	hp.print_hp()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	hp.optim.__name__ + str(hp.lr)[2:]
+	#print('Learning rate - {}, n batches - {}, n epochs - {}'.format(hp.lr, hp.n_batches, hp.n_epochs))
+	#density_column = np.max(V.sum(0).A1)/V.shape[0]
+	#density_row = np.max(V.sum(1).A1)/V.shape[1]
+	W, E = custom_nmf(V, Sw, Se,  params, hp, title)   # computes the custom nmf params
+
+	print()
+	'''
+	# reset hyperparameters
+	hp.lr = .01
+	hp.optim = torch.optim.Adagrad
+	hp.optim_settings = {'lr': hp.lr, 'lr_decay': .001}
+	hp.print_hp()
+	print('lr decay - ', .001)
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
+	print()
+
+	hp.lambdas = [.3, .3, .9]
+	hp.print_hp()
+	print('lr decay - ', .001)
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
+	print()
+
+	hp.lambdas = [5, 10, 7]
+	hp.print_hp()
+	print('lr decay - ', .001)
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
+	print()
+
+	hp.lambdas = [.5, .5, .5]
+	hp.lr = .01
+	hp.optim = torch.optim.Adagrad
+	hp.optim_settings = {'lr': hp.lr, 'lr_decay': .01}
+	hp.print_hp()
+	print('lr decay - ', .01)
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
+
+	print()
+	hp.lr = .001
+	hp.optim = torch.optim.Adam 
+	hp.optim_settings = {'lr': hp.lr}
+	hp.print_hp()
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params.hp, title)
 
 
-	W, H = custom_nmf(V, Sw, Se,  params)   # computes the custom nmf params
+	print()
+	hp.lambdas = [3, 3, .5]
+	hp.print_hp()
+	hp.print_lambdas()
+	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params.hp, title)
+
+
+
 
 
