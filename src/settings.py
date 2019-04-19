@@ -72,6 +72,7 @@ class Settings:
 			#self.n_batches = 10
 		elif args.dataset == 'freebase':
 			self.dataset_text 	= '../datasets/Freebase15k/entityWords.txt'
+			self.dataset_vocab 		= '../datasets/Freebase15k/word2id.txt'
 			self.dataset_entities = '../datasets/Freebase15k/train.txt'
 			self.dataset_transe 	= '../datasets/Freebase15k/entity2vec.' + args.transe_method
 

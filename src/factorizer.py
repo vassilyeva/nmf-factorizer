@@ -3,6 +3,8 @@ import argparse
 from settings import Settings
 from hyperparams import Hyperparameters
 from nmf import custom_nmf
+from nmf_dataloader import custom_nmf2
+from nmf_validation import custom_nmf_validation
 from nltk.corpus import wordnet as wn
 
 import torch
@@ -47,72 +49,16 @@ def parse_args():
 	return args
 
 
-def generate_tfidf_matrix(filename):
-	tfidf_transformer = TfidfTransformer()
+def save_model(E, W, version):
+	E = E.detach().cpu().numpy()
+	W = W.detach().cpu().numpy()
+	np.save('E_notrasfer_'+version+'.npy', E)
+	np.save('W_notransfer_'+version+'.npy', W)
 
-	corpus = pd.read_csv(dataset_file, sep = '\t', header = None)
-	remove_digits = str.maketrans('', '', digits)
-	corpus = [c.translate(remove_digits) for c in corpus.loc[:, 1]]
-	corpus = [c[:-3] if c[-3:] == '@en' else c for c in corpus]
-	vectorizer = CountVectorizer()
-	TF_matrix = vectorizer.fit_transform(corpus[:4])
-	words = vectorizer.get_feature_names()
-
-def set_params(params, args):
-	if args.dataset == 'test':
-		params.dataset_text 	= '../datasets/Test/entityWords.txt'
-		params.dataset_vocab 		= '../datasets/Test/word2id.txt'
-		params.dataset_transe = '../datasets/Test/entity2vec.' + args.transe_method	
-		params.test = True	
-		params.n_batches = 10
-	elif args.dataset == 'freebase':
-		params.dataset_text 		= '../datasets/Freebase15k/entityWords.txt'
-		params.dataset_entities 	= '../datasets/Freebase15k/train.txt'
-		params.dataset_transe = '../datasets/Freebase15k/entity2vec.' + args.transe_method
-	params.use_idf = args.use_idf
-	params.similarity = args.similarity
-
-	if args.similarity == 'wn-path':
-		params.similarity_function = wn.path_similarity
-		params.h5filename 		   = 'similarity_wordnet_path_' + args.dataset + '.h5'
-		params.h5omega			   = 'omega_wordnet_path_' + args.dataset + '.h5'
-	elif args.similarity == 'wn-wup':
-		params.similarity_function = wn.wup_similarity
-		params.h5filename		   = 'similarity_wordnet_wup_' + args.dataset + '.h5'
-		params.h5omega 			   = 'omega_wordnet_wup_' + args.dataset + '.h5'
-	else: 
-		params.h5filename		   = 'similarity_word2vec_' + args.dataset + '.h5'
-		params.h5omega			   = 'omega_word2vec_' + args.dataset + '.h5'
-
-	if  args.device == 'default':
-		has_cuda = True if  torch.cuda.is_available() else False
-		if has_cuda:
-			params.device = torch.device("cuda:0")
-			params.floatType = torch.cuda.FloatTensor
-			params.longType = torch.cuda.LongTensor
-		else:
-			params.device = torch.device("cpu")
-			params.floatType = torch.FloatTensor
-			params.longType = torch.LongTensor
-	elif args.device == 'gpu':
-		params.device = torch.device('cuda:0')
-		params.floatType = torch.cuda.FloatTensor
-		params.longType = torch.cuda.LongTensor
-	else:
-		params.device = torch.device('cpu')
-		params.floatType = torch.FloatTensor
-		params.longType = torch.LongTensor
-
-
-	if args.n_epochs:
-		params.n_epochs = args.n_epochs
-	if args.n_batches:
-		params.n_batches = args.n_batches
-	params.incr = args.incr
-	params.opt = args.optimizer
-	params.lr = args.lr
-
-
+	print('max value in E: ', np.max(E))
+	print('max value in W: ', np.max(W))
+	print('sum of all values in E: ', E.sum())
+	print('sum of all in W: ', W.sum())
 
 
 if __name__ == "__main__":
@@ -136,18 +82,20 @@ if __name__ == "__main__":
 		print('Loaded Sw matrix')
 		Se = sparse.load_npz('Se_' + args.dataset + '.npz')
 		print('Loaded Se matrix')
+		embE = np.load('EntityEmb.npy')
+		embW = np.load('WordEmb.npy')
 
 	else:
 		V, sentences, words = dp.compute_tfidf_matrix(params)
 		print('TFIDF Shape - ', V.shape)
 		if params.similarity == 'cos':
-			V, Sw = dp.compute_Sw_cosine(params, V, sentences, words, args.dataset)
+			V, Sw, embW = dp.compute_Sw_cosine(params, V, sentences, words, args.dataset)
 		else: 
 			Sw = dp.compute_wordnet_similarity_words(params, words)
 		print('Constructed Sw matrix, shape - {}'.format(Sw.shape))
 
 		#S_matrix = np.memmap(params.similarity_matrix_filename, dtype = 'float32', mode = 'r')
-		Se = dp.compute_Se_cosine(params, args.dataset)
+		Se, embE = dp.compute_Se_cosine(params, args.dataset)
 		print('Constructed Se matrix')
 	'''
 	hp.print_hp()
@@ -159,7 +107,7 @@ if __name__ == "__main__":
 	W, E = custom_nmf(V, Sw, Se,  params, hp, title)   # computes the custom nmf params
 
 	print()
-	'''
+	
 	# reset hyperparameters
 	hp.lr = .01
 	hp.optim = torch.optim.Adagrad
@@ -186,35 +134,60 @@ if __name__ == "__main__":
 	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
 	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 	print()
+	
 
-	hp.lambdas = [.5, .5, .5]
-	hp.lr = .01
+	hp.lambdas = [20, 20, .5]
+	hp.lr = .1
 	hp.optim = torch.optim.Adagrad
-	hp.optim_settings = {'lr': hp.lr, 'lr_decay': .01}
+	hp.optim_settings = {'lr': hp.lr, 'lr_decay': .0001}
 	hp.print_hp()
-	print('lr decay - ', .01)
+	print('lr decay - ', .0001)
 	hp.print_lambdas()
-	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	title = '../results/' + \
+			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
 	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 
 	print()
+	
 	hp.lr = .001
 	hp.optim = torch.optim.Adam 
 	hp.optim_settings = {'lr': hp.lr}
 	hp.print_hp()
 	hp.print_lambdas()
-	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
-	W, E = custom_nmf(V, Sw, Se, params.hp, title)
-
+	title = '../results/' + \
+			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 
 	print()
 	hp.lambdas = [3, 3, .5]
 	hp.print_hp()
 	hp.print_lambdas()
-	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	title = '../results/' + \
+			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
 	W, E = custom_nmf(V, Sw, Se, params.hp, title)
+	
 
+	print()
+	hp.optim = torch.optim.SGD 
+	hp.print_hp()
+	hp.print_lambdas()
+	title = '../results/' + \
+			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 
+	'''
+	print()
+	print('These results are from starting with initW, initE = embedding vectors')
+	hp.optim = torch.optim.SGD 
+	hp.lr = .01
+	hp.print_hp()
+	hp.print_lambdas()
+	title = '../results/' + \
+			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
+	E, W = custom_nmf(V, Sw, Se, params, hp, title, embE, embW)
+
+	version = '_'.join([str(l) for l in hp.lambdas])
+	save_model(E, W, version+"transfer")
 
 
 

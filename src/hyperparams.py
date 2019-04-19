@@ -6,7 +6,8 @@ import torch
 
 class Hyperparameters:
 	def __init__(self):
-		self.lambdas = [.5, .5, .5]  # regularizer params for Se, Sw, and model parameters
+		self.lambdas = [.01, .01, .2]  # regularizer params for Se, Sw, and model parameters
+		self.momentum = .4
 
 	def set(self, args):
 		self.n_epochs = args.n_epochs 
@@ -15,10 +16,11 @@ class Hyperparameters:
 		self.n_features = args.n_features
 		self.n_negatives = args.n_negatives
 
-		self.optim_settings = {'lr': self.lr}
 
 		if args.optim == 'sgd':
 			self.optim = torch.optim.SGD 
+			self.optim_settings = {'lr': self.lr, 'momentum': self.momentum}
+
 		elif args.optim == 'adam':
 			self.optim = torch.optim.Adam
 			wd = .001
@@ -35,6 +37,6 @@ class Hyperparameters:
 		print(settings)
 
 	def print_lambdas(self):
-		lambdas_string = ('Regularization params: Se - {}' \
+		lambdas_string = ('Regularization params: Se - {}, ' \
 						  'Sw - {}, P - {}'.format(*self.lambdas))
 		print(lambdas_string)

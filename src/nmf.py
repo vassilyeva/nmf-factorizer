@@ -1,5 +1,7 @@
 from collections import Counter
 import dataprocessing as dp
+import imp
+from sklearn import decomposition
 
 import numpy as np
 from scipy import sparse
@@ -20,23 +22,18 @@ print_time = False
 print_time_similarity = False
 
 
-# TODO: 
-'''
-1. Remove ugly global parameters - decide what to use for large datafile
-2. Check wordnet similarity functions - do they compute the correct result?
-
-'''
-
-
 ''' MODEL '''
 
 class NMF(torch.nn.Module):
-	def __init__(self, n_entities, n_words, n_features, params):
+	def __init__(self, n_entities, n_words, n_features, initE, initW, params):
 		super().__init__()
-		W_data = Variable(torch.FloatTensor(n_features, n_words))
-		E_data = Variable(torch.FloatTensor(n_entities, n_features))
-		W_data.normal_(std = 1).abs_()
-		E_data.normal_(std = 1).abs_()
+		#W_data = Variable(torch.FloatTensor(n_features, n_words))
+		#E_data = Variable(torch.FloatTensor(n_entities, n_features))
+		W_data = Variable(torch.from_numpy(initW).type(torch.FloatTensor))
+		E_data = Variable(torch.FloatTensor(initE))
+
+		#W_data.uniform_(0, 1).abs_()
+		#E_data.uniform_(0, 1).abs_()
 		self.W = nn.Parameter(W_data)   
 		self.E = nn.Parameter(E_data)
 		self.device = params.device
@@ -57,8 +54,8 @@ class NMF(torch.nn.Module):
 
 	def positivise(self):
 		''' Make W and H non-negative '''
-		self.W.data = torch.clamp(self.W, min = 0.)
-		self.E.data = torch.clamp(self.E, min = 0.)
+		self.W.data = torch.clamp(self.W, min = 0.001)
+		self.E.data = torch.clamp(self.E, min = 0.001)
 
 	def print_params(self):
 		print("W: ")
@@ -235,9 +232,8 @@ class CustomLoss(torch.nn.Module):
 		word_penalty = self.similarity_matrix_penalty(model.W, Sw, batch, model.device, False)
 
 		#similarity_penalty = regword_penalty + entity_penalty
-		assert entity_penalty.item() >= 0, "Entity penalty is negative"
-		assert word_penalty.item() >= 0, 'Word penalty is negative'
-		loss = (target.to(model.device) - prediction.to(model.device)).norm(2) + \
+		difference = (target.to(model.device) - prediction.to(model.device)).norm(2)
+		loss = difference + \
 			    reg[0]*entity_penalty + reg[1]*word_penalty + reg[2]*penalty.to(model.device)
 		return loss
 		
@@ -297,15 +293,34 @@ def rejection_sampling(n, nonzeros, already_sampled, n_rows, n_cols, from_entiti
 
 def plot_results(losses, differences, n_epochs, model, title):
 	# plot loss and difference
-	plt.plot(range(0, n_epochs, 50), differences, label = '|V - EW|')
+	plt.plot(list(range(0, n_epochs, 50)) + [n_epochs - 1], differences, label = '|V - EW|')
 	plt.xlabel("Epoch"); plt.ylabel("Error")
 	plt.title(title[:-4])
 
 	plt.plot(losses, label = 'Loss')
 	plt.xlabel("Epoch")
 	plt.legend()
-	#plt.show()
+	plt.show()
+
+	plt.clf()
+	plt.plot(losses)
+	plt.title('Loss')
+	plt.xlabel("Epoch"); plt.ylabel('Loss')
+	plt.show()
+
+	plt.clf()
+	plt.plot(list(range(0, n_epochs, 50)) + [n_epochs - 1], differences)
+	plt.title('Difference ||V - EW||')
+	plt.xlabel("Epoch"); plt.ylabel('Difference')
+	plt.show()
+
+
+	'''
 	plt.savefig(title)
+	plt.clf()
+	plt.cla()
+	plt.close()
+	'''
 
 
 def construct_batches(n_batches, n_negatives, V, from_entities):
@@ -390,8 +405,15 @@ def check_densities(V):
 
 	return True if row_max/V.shape[1] <= col_max/V.shape[0] else False 
 
+def init_values(V, n_features):
+	mdl = decomposition.NMF(n_components = n_features)
+	initE = mdl.fit_transform(V)
+	initW = mdl.components_
+	return initE, initW
 
-def custom_nmf(V, Sw, Se, params, hyperparams, title):
+def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
+	print('Without transfer learning')
+	print('with momentum and lr scheduler')
 
 	# decide where to draw negative samples from - entities (= for every (i,j) positive, find (i, *) neg) or words
 	'''density_column = np.max(V.sum(0).A1)/V.shape[0]
@@ -411,12 +433,28 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title):
 	losses = []
 
 	# define model
+	'''
+	initE, initW = init_values(V, hyperparams.n_features)
+	np.save('initE.npy', initE)
+	np.save('initW.npy', initW)
+	'''
+	initW = np.load('initW.npy')
+	initE = np.load('initE.npy')
 
-
-	model = NMF(n_entities, n_words, hyperparams.n_features, params)
+	initW = np.abs(initW)
+	initE = np.abs(initE)
+	print(initW.shape)
+	'''
+	initW = np.random.uniform(0, 10, size = (n_words, hyperparams.n_features))
+	initE = np.random.uniform(0, 10, size = (n_entities, hyperparams.n_features))
+	'''
+	model = NMF(n_entities, n_words, hyperparams.n_features, initE, initW, params)
+	initW = None; initE = None
+	print('Created NMF model')
 
 	loss = CustomLoss(params.device)
 	optimizer = hyperparams.optim(model.parameters(), **hyperparams.optim_settings)
+	scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 20, gamma = .1)
 	
 
 	# construct tensors
@@ -465,13 +503,12 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title):
 			optimizer.step()
 			model.positivise()
 			total_loss += l.item()
-			torch.cuda.empty_cache()
 
 		# test the model after each epoch
 		#total_loss /= hyperparams.n_batches   
 		losses.append(total_loss)
 		print('Epoch - {}: loss - {}'.format(epoch, total_loss))
-		if epoch % 50 == 0:
+		if epoch % 50 == 0 or epoch == hyperparams.n_epochs - 1:
 			t_start = timeit.default_timer()
 			V_prediction = torch.mm(model.E, model.W)   
 			t_diff = timeit.default_timer() - t_start
@@ -480,10 +517,10 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title):
 			differences.append(diff)
 			print('\t\t \t \t difference - {}'.format(diff))
 
-
+		scheduler.step()	
 	plot_results(losses, differences, hyperparams.n_epochs, model, title)
 
-	return 0, 0
+	return model.E, model.W
 
 			
 

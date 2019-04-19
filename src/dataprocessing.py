@@ -5,8 +5,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy import sparse
 
-import symmetric as sm
-
 from nltk.corpus import wordnet as wn
 from gensim.models import Word2Vec
 
@@ -70,7 +68,7 @@ def compute_similarity(params, synset_pair):
 def cosine_similarity_matrix(params, embeddings, matrix_type):
 	k = params.n_similar		# top k similarity values to keep - change this!
 	size = len(embeddings)
-	print('computed embedding shape is ', embeddings.shape)
+	print('computed embedding shape is ', len(embeddings))
 
 	embeddings = torch.Tensor(embeddings).to(params.device)
 	embeddings_norm = embeddings / embeddings.norm(dim = 1)[:, None]
@@ -97,9 +95,9 @@ def cosine_similarity_matrix(params, embeddings, matrix_type):
 	sparse.save_npz(matrix_type + '.npz', similarity_matrix)
 	return similarity_matrix
 
+
 def compute_Se_cosine(params, dataset):
 	# load embedding vectors
-	print('in compute SE cosine')
 	line_count = 0
 	entity_embeddings = []
 	with open(params.dataset_transe, 'r') as fin:
@@ -110,7 +108,9 @@ def compute_Se_cosine(params, dataset):
 			line_count += 1
 	fin.close()
 	entity_embeddings = np.array(entity_embeddings)
-	return cosine_similarity_matrix(params, entity_embeddings, 'Se_'+dataset)
+	print('entity embeddings shape - ', entity_embeddings.shape)
+	np.save('EntityEmb.npy', entity_embeddings)
+	return cosine_similarity_matrix(params, entity_embeddings, 'Se_'+dataset), entity_embeddings
 
 '''
 def construct_Sw_cosine(params, word_embeddings, words):
@@ -156,10 +156,13 @@ def compute_Sw_cosine(params, tfidf_matrix, documents, words, dataset):
 
 	n_rows = len(embeddings)
 	
-	Sw = cosine_similarity_matrix(params, embeddings, 'Sw_'+dataset)
+	Sw = cosine_similarity_matrix(params, embeddings, 'Sw_'+dataset)   # TODO: CHANGE THIS - REMOVE THIS FUNCTION
 	
 	sparse.save_npz('V_'+dataset+'.npz', tfidf_matrix)
-	return tfidf_matrix, Sw
+	embeddings = np.array(embeddings)
+	np.save('WordEmb.npy', embeddings)
+	print('word embeddings shape is ', embeddings.shape)
+	return tfidf_matrix, Sw, embeddings
 
 
 def compute_wordnet_similarity_words(params, words):
