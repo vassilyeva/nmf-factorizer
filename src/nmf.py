@@ -76,46 +76,10 @@ class CustomLoss(torch.nn.Module):
 		tensor_type = tc.FloatTensor if torch.cuda.is_available else torch.FloatTensor
 		return (A>0).type(tensor_type)*torch.clamp(A, max=0.)
 
-	'''
-	def similarity_penalty_Sw(self, P, S, j_indices, i_indices, device):
-			P - for parameter matrix (E or W)
-			S - for similarity matrix (Se or Sw)
-		
-		penalty = 0
-		for j, i_inds in zip(j_indices, i_indices):
-			Swj_whole = torch.Tensor(S.getrow(j).toarray()[0])
-			Swj = torch.gather(Swj_whole, 0, i_inds).to(device)
-			W_sample_i = P.index_select(1, i_inds.to(device))
-			W_sample_j = P.index_select(1, j.to(device))
-			diff = (W_sample_j - W_sample_i).norm(2)
-			penalty += (diff * Swj).sum()
 
-		return penalty
-	'''
-	'''
-	def similarity_penalty_Se(self, P, S, i, j_indices, device):
-		 P - for parameter matrix (E or W)
-			S - for similarity matrix (Se or Sw)
-		
-		penalty = 0
-		Sei = torch.Tensor(S.getrow(i).toarray()[0])
-		Se_sample = torch.gather(Sei, 0, j_indices).to(device)
-		Ei = P.index_select(0, torch.LongTensor([i]).to(device))
-		Ej = P.index_select(0, j_indices.to(device))
-
-		diff = (Ei - Ej).norm(2)
-		penalty = (diff*Se_sample).sum()
-		return penalty
-		'''
 
 
 	def entity_penalty2(self, P, S, batch, device, entity = True):
-		''' For entity term: 
-			For every i (= item[0]), find set of js (= nonzero values in row i in Se)
-				For every j: 
-					total += Se(i,j)*(E(i) - E(j)).norm(2)
-		'''
-		# For every entity in the batch - find a set of entities that are similar to it
 		ind = 0 if entity else 1
 		S_sample_indices = torch.LongTensor([S.getrow(item[ind]).nonzero()[1] for item in batch]).to(device)
 		penalty = 0
@@ -128,17 +92,11 @@ class CustomLoss(torch.nn.Module):
 				Pi = Pi.transpose(0,1)
 				Pj = Pj.transpose(0,1)
 
-			print('Pi shape ', Pi.shape)
-			print('Pj shape ', Pj.shape)
 
 			norms = torch.norm(Pi - Pj, p = 2, dim = 1)
-			print('norms shape ', norms.shape)
 			S_row_i = torch.FloatTensor(S.getrow(i).toarray()[0]).to(device)
 			S_sample = torch.gather(S_row_i, 0, js).to(device)
-			print('S_sample shape is ', S_sample.shape)
 			penalty += (norms * S_sample).sum()
-			print('Penalty shape is ', penalty.shape)
-			print('penalty is ', penalty.item())
 
 		return penalty
 
@@ -151,61 +109,24 @@ class CustomLoss(torch.nn.Module):
 		# For every entity in the batch - find a set of entities that are similar to it
 		ind = 0 if entity else 1
 		i_indices_numpy = np.array([item[ind] for item in batch])
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		S_sample_indices = S.tocsc()[i_indices_numpy, :].nonzero()[1]
 
-		'''
-		S_sample_indices = torch.LongTensor([S.getrow(item[ind]).nonzero()[1] for item in batch]).to(device)
-		'''
-
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to compute S_sample_indices - ", t_diff)
-
-		
-		#i_indices = torch.LongTensor(i_indices_list).to(device)
 		i_indices = torch.LongTensor(i_indices_numpy).to(device)
 		n_repeat = len(S_sample_indices) // len(batch)
 		
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		Pi = P.to(device).index_select(ind, i_indices)
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to index select Pi - ", t_diff)
-		#print('batchsize = ', len(batch))
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		j_indices_long = torch.LongTensor(S_sample_indices).to(device)
 		Pj = P.to(device).index_select(ind, j_indices_long)
-		#Pj = P.to(device).index_select(ind, torch.flatten(S_sample_indices))
 		
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to index select Pj - ", t_diff)
 		if not entity:
 			Pi = Pi.transpose(0,1)
 			Pj = Pj.transpose(0,1)
 		Pi = Pi.repeat(1, n_repeat).view(-1, Pj.shape[1])
 
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		norms = torch.norm(Pi - Pj, p = 2, dim = 1)
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to compute norm - ", t_diff)
-
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		rows = i_indices_numpy.repeat(n_repeat)
 
-		if print_time_similarity: 
-			t_start = timeit.default_timer()
 		S_sample = torch.FloatTensor(S[rows, S_sample_indices]).flatten().to(device)
-		if print_time_similarity:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print("time to gather S_sample - ", t_diff)
 		penalty = (norms * S_sample).sum()
 		return penalty
 		
@@ -215,52 +136,17 @@ class CustomLoss(torch.nn.Module):
 		tensor_type = tc.FloatTensor
 		penalty = tensor_type([0])
 
-		if print_time:
-			t_start = timeit.default_timer()
 		for p in model.parameters():
 			penalty += ((p > 0).type(tc.FloatTensor)*torch.clamp(p, min = 0.).type(tc.FloatTensor)).norm(2)
-		if print_time:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print('time to compute parameter penalty - ', t_diff)
-		
-		if print_time:
-			t = timeit.default_timer()
 		entity_penalty = self.similarity_matrix_penalty(model.E, Se, batch, model.device, True) 
-		if print_time:
-			t_diff = (timeit.default_timer() - t_start)*100
-			print('time to compute similarity matrices penalty - ', t_diff)
 		word_penalty = self.similarity_matrix_penalty(model.W, Sw, batch, model.device, False)
 
-		#similarity_penalty = regword_penalty + entity_penalty
 		difference = (target.to(model.device) - prediction.to(model.device)).norm(2)
 		loss = difference + \
 			    reg[0]*entity_penalty + reg[1]*word_penalty + reg[2]*penalty.to(model.device)
 		return loss
-		
-			
 
 
-		#similarity_penalty += self.entity_penalty3()
-		return (target.to(model.device) - prediction.to(model.device)).norm(2) + lamb*penalty.to(model.device) \
-				+ similarity_penalty
-
-	'''
-	def forward(self, actual, prediction, row_ind, word_i_indices, entity_j_indices, sample_j_indices, lamb, model, Sw, Se):
-		tensor_type = model.type
-		penalty = 0
-		for p in model.parameters():
-			penalty += ((p>0).type(tensor_type)*torch.clamp(p, min=0.)).norm(2)      # norm of positive values only
-
-		#penalty = ((model.W > 0).type(tensor_type)*torch.clamp(model.W, min = 0.)).norm(2)
-		#penalty += ((model.E > 0).type(tensor_type)*torch.clamp(model.E, min = 0.)).norm(2)
-
-		similarity_penalty = self.similarity_penalty_Sw(model.W, Sw, sample_j_indices, word_i_indices, model.device)
-		
-		similarity_penalty += self.similarity_penalty_Se(model.E, Se, row_ind, entity_j_indices, model.device)
-
-
-		return (actual.to(model.device) - prediction).norm(2) + lamb*penalty + similarity_penalty.type(tensor_type)
-	'''
 
 def rejection_sampling(batch_counter, n_negatives, high, nonzeros, already_sampled, from_entities):
 	total_negative_sample = set()		# negative sample for the whole batch
@@ -281,15 +167,6 @@ def rejection_sampling(batch_counter, n_negatives, high, nonzeros, already_sampl
 
 
 		
-'''
-def rejection_sampling(n, nonzeros, already_sampled, n_rows, n_cols, from_entities):
-	negative_sample = []
-	while len(negative_sample) < n:
-		diff = n - len(negative_sample)
-		random_sample = [(np.random.randint(low = 0, high = n_rows), np.random.randint(low = 0, high = n_cols)) for _ in range(diff)]
-		negative_sample.extend([item for item in random_sample if (item not in nonzeros and item not in already_sampled)])
-	return negative_sample
-'''
 
 def plot_results(losses, differences, n_epochs, model, title):
 	# plot loss and difference
@@ -314,13 +191,6 @@ def plot_results(losses, differences, n_epochs, model, title):
 	plt.xlabel("Epoch"); plt.ylabel('Difference')
 	plt.show()
 
-
-	'''
-	plt.savefig(title)
-	plt.clf()
-	plt.cla()
-	plt.close()
-	'''
 
 
 def construct_batches(n_batches, n_negatives, V, from_entities):
@@ -357,23 +227,9 @@ def construct_batches(n_batches, n_negatives, V, from_entities):
 			already_sampled |= negative_samples
 			batch.extend(list(negative_samples))
 
-	#print('Constructed negative samples')
-	'''
-
-	for batch in batches:
-		negative_samples = rejection_sampling(len(batch), n_negative, nonzeros, already_sampled, V.shape[0], n_words, from_entities)
-		batch.extend(negative_samples)
-		already_sampled.update(negative_samples)
-	print('Constructed negative samples')
-	'''
 	return batches
 
 
-def get_Sw_sample(Sw, row_inds, col_inds):
-	''' For each index in row_inds, collect all elements from that col '''
-	print(row_ind)
-	print()
-	print(col_inds)
 
 def get_batch_indices(V, Sw, Se, row_ind, device, n_entities):
 	n = 20   	# number positive samples to pick
@@ -426,10 +282,6 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
 	n_words = Sw.shape[0]
 	n_entities = Se.shape[0]
 
-	print('V shape: ', V.shape)
-	print('n entities - ', n_entities)
-	print('n words - ', n_words)
-
 	losses = []
 
 	# define model
@@ -443,7 +295,6 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
 
 	initW = np.abs(initW)
 	initE = np.abs(initE)
-	print(initW.shape)
 	'''
 	initW = np.random.uniform(0, 10, size = (n_words, hyperparams.n_features))
 	initE = np.random.uniform(0, 10, size = (n_entities, hyperparams.n_features))
@@ -472,31 +323,14 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
 			bcount += 1
 			optimizer.zero_grad()
 
-			#print('On batch ', bcount)
-			if print_time:
-				# construct sample
-				t_start = timeit.default_timer()
 			target = get_target_values(batch, V)
 			
-			if print_time: 
-				t_diff = (timeit.default_timer() - t_start)*100
-				print('Time to collect target - ', t_diff)
-
 
 			if print_time: t_start = timeit.default_timer()
 			prediction = model(batch)
 			
-			if print_time: 
-				t_diff = (timeit.default_timer() - t_start)*100
-				print('Time to compute prediction - ', t_diff)
-
-			if print_time: t_start = timeit.default_timer()
 			l = loss(target, prediction, hyperparams.lambdas, batch, model, Sw, Se)
 			
-			if print_time: 
-				t_diff = (timeit.default_timer() - t_start)*100
-				print('Time to compute loss - ', t_diff)
-
 
 			l.backward(retain_graph = True)
 
@@ -511,8 +345,6 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
 		if epoch % 50 == 0 or epoch == hyperparams.n_epochs - 1:
 			t_start = timeit.default_timer()
 			V_prediction = torch.mm(model.E, model.W)   
-			t_diff = timeit.default_timer() - t_start
-			#print('time to compute difference - ', t_diff * 100)
 			diff = (V_tensor - V_prediction).norm(2).item()
 			differences.append(diff)
 			print('\t\t \t \t difference - {}'.format(diff))
@@ -523,16 +355,4 @@ def custom_nmf(V, Sw, Se, params, hyperparams, title, initE, initW):
 	return model.E, model.W
 
 			
-
-
-
-" QUESTIONS "
-'''
-
-
-4. Keep similarity threshold for entities as well?
-
-
-'''
-
 
