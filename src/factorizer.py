@@ -1,5 +1,7 @@
+
 import argparse
-from settings import Settings, Hyperparameters
+from settings import Settings
+from hyperparams import Hyperparameters
 from nmf import custom_nmf
 from nmf_dataloader import custom_nmf2
 from nmf_validation import custom_nmf_validation
@@ -38,7 +40,7 @@ def parse_args():
 	parser.add_argument('--n-batches', type = int, default = 100, help = 'Number of batches')
 	parser.add_argument('--n-features', type = int, default = 100, help = 'Number of features in embedding')
 	parser.add_argument('--n-negatives', type = int, default = 5, help = 'Number negative samples for each positive one')
-  parser.add_argument('--valid', type = bool, default = True, help = 'Construct validation set?')
+
 
 	# TEST ARGUMENTS
 	parser.add_argument('--dataset', default = 'freebase', choices = ['freebase', 'test'])
@@ -69,8 +71,9 @@ if __name__ == "__main__":
 
 	hp = Hyperparameters()
 	hp.set(args)
+	#set_params(params, args)
 
-
+	
 
 	if args.sim_matrix == 'fromfile':
 		V = sparse.load_npz('V_'+args.dataset+'.npz')
@@ -87,7 +90,7 @@ if __name__ == "__main__":
 		print('TFIDF Shape - ', V.shape)
 		if params.similarity == 'cos':
 			V, Sw, embW = dp.compute_Sw_cosine(params, V, sentences, words, args.dataset)
-		else:
+		else: 
 			Sw = dp.compute_wordnet_similarity_words(params, words)
 		print('Constructed Sw matrix, shape - {}'.format(Sw.shape))
 
@@ -104,7 +107,7 @@ if __name__ == "__main__":
 	W, E = custom_nmf(V, Sw, Se,  params, hp, title)   # computes the custom nmf params
 
 	print()
-
+	
 	# reset hyperparameters
 	hp.lr = .01
 	hp.optim = torch.optim.Adagrad
@@ -131,7 +134,7 @@ if __name__ == "__main__":
 	title = '_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
 	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 	print()
-
+	
 
 	hp.lambdas = [20, 20, .5]
 	hp.lr = .1
@@ -145,9 +148,9 @@ if __name__ == "__main__":
 	W, E = custom_nmf(V, Sw, Se, params, hp, title)
 
 	print()
-
+	
 	hp.lr = .001
-	hp.optim = torch.optim.Adam
+	hp.optim = torch.optim.Adam 
 	hp.optim_settings = {'lr': hp.lr}
 	hp.print_hp()
 	hp.print_lambdas()
@@ -162,10 +165,10 @@ if __name__ == "__main__":
 	title = '../results/' + \
 			'_'.join([hp.optim.__name__, str(hp.lr)[2:], *[str(l) for l in hp.lambdas]]) + '.png'
 	W, E = custom_nmf(V, Sw, Se, params.hp, title)
-
+	
 
 	print()
-	hp.optim = torch.optim.SGD
+	hp.optim = torch.optim.SGD 
 	hp.print_hp()
 	hp.print_lambdas()
 	title = '../results/' + \
@@ -175,7 +178,7 @@ if __name__ == "__main__":
 	'''
 	print()
 	print('These results are from starting with initW, initE = embedding vectors')
-	hp.optim = torch.optim.SGD
+	hp.optim = torch.optim.SGD 
 	hp.lr = .01
 	hp.print_hp()
 	hp.print_lambdas()
